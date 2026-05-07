@@ -40,7 +40,7 @@ Advanced disaggregated deployment with KV cache routing capabilities.
 ### 5. **Global Planner Deployments** (see [`examples/global_planner/`](../../../global_planner/))
 Centralized scaling across multiple DGDs via GlobalPlanner. Examples include single-endpoint multi-pool and multi-model GPU budget patterns. See the [global planner examples](../../../global_planner/) for details.
 
-### 6. **Deployments with Intel XPU (Optional)** (`agg_xpu_dra.yaml` or `disagg_xpu_dra.yaml`)
+### 6. **Deployments with Intel XPU (Optional)** (see `xpu/` directory)
 Hardware-specific aggregated/disaggregated deployment using Kubernetes Dynamic Resource Allocation (DRA).
 
 **Aggregated Architecture:**
@@ -141,8 +141,10 @@ Select the deployment pattern that matches your requirements:
 - Use `disagg.yaml` for maximum performance
 - Use `disagg_router.yaml` for high-performance with KV cache routing
 - Use `disagg_planner.yaml` for SLA-optimized performance
-- Use `agg_xpu_dra.yaml` for aggregated deployment on Intel XPU clusters using Kubernetes DRA
-- Use `disagg_xpu_dra.yaml` for disaggregated deployment on Intel XPU clusters using Kubernetes DRA
+- Use `xpu/agg_xpu_dra.yaml` for aggregated deployment on Intel XPU clusters using Kubernetes DRA
+- Use `xpu/disagg_xpu_dra.yaml` for disaggregated deployment on Intel XPU clusters using Kubernetes DRA
+- Use `xpu/agg_router_xpu_dra.yaml` for aggregated deployment with KV-aware routing on Intel XPU
+- Use `xpu/agg_router_kv_approx_xpu_dra.yaml` for KV-aware routing without KV events on Intel XPU
 - Use [global planner examples](../../../global_planner/) for centralized scaling across multiple DGDs
 
 ### 2. Customize Configuration
@@ -191,10 +193,13 @@ Deploy the XPU template (includes the ResourceClaimTemplate):
 cd <dynamo-source-root>/examples/backends/vllm/deploy
 
 # For aggregated deployment
-kubectl apply -f agg_xpu_dra.yaml -n $NAMESPACE
+kubectl apply -f xpu/agg_xpu_dra.yaml -n $NAMESPACE
 
 # OR for disaggregated deployment
-kubectl apply -f disagg_xpu_dra.yaml -n $NAMESPACE
+kubectl apply -f xpu/disagg_xpu_dra.yaml -n $NAMESPACE
+
+# OR for KV-aware routing deployment
+kubectl apply -f xpu/agg_router_xpu_dra.yaml -n $NAMESPACE
 ```
 
 Verify claim allocation:
@@ -204,7 +209,7 @@ kubectl get resourceclaim -n $NAMESPACE
 kubectl get dynamographdeployment -n $NAMESPACE
 ```
 
-`agg_xpu_dra.yaml` and `disagg_xpu_dra.yaml` are optional hardware-specific templates and do not change the default deployment paths defined by `agg.yaml` and `disagg.yaml`.
+XPU templates in `xpu/` directory are optional hardware-specific templates and do not change the default deployment paths defined by `agg.yaml` and `disagg.yaml`.
 
 ### 4. Using Custom Dynamo Frameworks Image for vLLM
 
