@@ -7,8 +7,8 @@
 # - disagg_router.yaml: KV router mode for disaggregation
 #
 # Prerequisites:
-# 1. Build XPU runtime image: dynamo:vllm-runtime-xpu (see worklogs/dynamo-xpu-image-build-guide.md)
-# 2. Load image into kind cluster: kind load docker-image dynamo:vllm-runtime-xpu -n <cluster-name>
+# 1. Build XPU runtime image: dynamo:vllm-runtime-xpu-v2 (see worklogs/dynamo-xpu-image-build-guide.md)
+# 2. Load image into kind cluster: kind load docker-image dynamo:vllm-runtime-xpu-v2 -n <cluster-name>
 # 3. Create hf-token-secret: kubectl create secret generic hf-token-secret --from-literal=token=<your-token>
 
 apiVersion: resource.k8s.io/v1
@@ -56,7 +56,7 @@ spec:
             resourceClaimTemplateName: gpu-template
         mainContainer:
           # Use custom XPU runtime image with vLLM compatibility fix
-          image: dynamo:vllm-runtime-xpu
+          image: dynamo:vllm-runtime-xpu-v2
           resources:
             claims:
               - name: gpu
@@ -75,6 +75,8 @@ spec:
             - decode
             - --block-size
             - "64"
+            - --gpu-memory-utilization
+            - "0.45"
     VllmPrefillWorker:
       envFromSecret: hf-token-secret
       componentType: worker
@@ -90,7 +92,7 @@ spec:
             resourceClaimTemplateName: gpu-template
         mainContainer:
           # Use custom XPU runtime image with vLLM compatibility fix
-          image: dynamo:vllm-runtime-xpu
+          image: dynamo:vllm-runtime-xpu-v2
           resources:
             claims:
               - name: gpu
@@ -111,3 +113,5 @@ spec:
             - '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_buffer_device":"xpu"}'
             - --block-size
             - "64"
+            - --gpu-memory-utilization
+            - "0.45"
