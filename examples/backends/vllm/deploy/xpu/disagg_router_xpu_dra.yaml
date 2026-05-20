@@ -1,0 +1,113 @@
+# SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# XPU Disaggregated Router deployment with KV routing
+# Combines:
+# - disagg_xpu_dra.yaml: XPU DRA resource allocation
+# - disagg_router.yaml: KV router mode for disaggregation
+#
+# Prerequisites:
+# 1. Build XPU runtime image: dynamo:vllm-runtime-xpu (see worklogs/dynamo-xpu-image-build-guide.md)
+# 2. Load image into kind cluster: kind load docker-image dynamo:vllm-runtime-xpu -n <cluster-name>
+# 3. Create hf-token-secret: kubectl create secret generic hf-token-secret --from-literal=token=<your-token>
+
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: gpu-template
+spec:
+  spec:
+    devices:
+      requests:
+        - name: gpu
+          exactly:
+            deviceClassName: gpu.intel.com
+            count: 1
+---
+apiVersion: nvidia.com/v1alpha1
+kind: DynamoGraphDeployment
+metadata:
+  name: vllm-disagg-router-xpu
+spec:
+  services:
+    Frontend:
+      envFromSecret: hf-token-secret
+      componentType: frontend
+      replicas: 1
+      extraPodSpec:
+        mainContainer:
+          # Use official frontend image (doesn't need XPU)
+          image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:1.1.1
+          env:
+            - name: DYN_ROUTER_MODE
+              value: kv
+    VllmDecodeWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: decode
+      replicas: 1
+      resources:
+        requests:
+          custom:
+            ephemeral-storage: "2Gi"
+      extraPodSpec:
+        resourceClaims:
+          - name: gpu
+            resourceClaimTemplateName: gpu-template
+        mainContainer:
+          # Use custom XPU runtime image with vLLM compatibility fix
+          image: dynamo:vllm-runtime-xpu
+          resources:
+            claims:
+              - name: gpu
+          env:
+            - name: VLLM_TARGET_DEVICE
+              value: xpu
+          workingDir: /workspace/examples/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --disaggregation-mode
+            - decode
+            - --block-size
+            - "64"
+    VllmPrefillWorker:
+      envFromSecret: hf-token-secret
+      componentType: worker
+      subComponentType: prefill
+      replicas: 1
+      resources:
+        requests:
+          custom:
+            ephemeral-storage: "2Gi"
+      extraPodSpec:
+        resourceClaims:
+          - name: gpu
+            resourceClaimTemplateName: gpu-template
+        mainContainer:
+          # Use custom XPU runtime image with vLLM compatibility fix
+          image: dynamo:vllm-runtime-xpu
+          resources:
+            claims:
+              - name: gpu
+          env:
+            - name: VLLM_TARGET_DEVICE
+              value: xpu
+          workingDir: /workspace/examples/backends/vllm
+          command:
+            - python3
+            - -m
+            - dynamo.vllm
+          args:
+            - --model
+            - Qwen/Qwen3-0.6B
+            - --disaggregation-mode
+            - prefill
+            - --kv-transfer-config
+            - '{"kv_connector":"NixlConnector","kv_role":"kv_both","kv_buffer_device":"xpu"}'
+            - --block-size
+            - "64"
