@@ -17,63 +17,65 @@ spec:
 apiVersion: nvidia.com/v1alpha1
 kind: DynamoGraphDeployment
 metadata:
-  name: vllm-agg-router-kv-approx-xpu
+  name: vllm-agg-tracing-xpu
 spec:
+  envs:
+    - name: DYN_LOGGING_JSONL
+      value: "true"
+    - name: OTEL_EXPORT_ENABLED
+      value: "true"
+    # NOTE: Update endpoint if observability stack is deployed
+    # Remove or disable if not using tracing
+    - name: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT
+      value: "http://tempo.observability.svc.cluster.local:4317"
   services:
     Frontend:
+      envFromSecret: hf-token-secret
       componentType: frontend
       replicas: 1
       extraPodSpec:
         mainContainer:
+          # NOTE: Frontend doesn't need XPU, use official image
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
-          command:
-            - python3
-          args:
-            - -m
-            - dynamo.frontend
-            - --router-mode
-            - kv
-            - --no-kv-events
-      envs:
-        - name: DYN_ROUTER_MODE
-          value: kv
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-frontend"
     VllmDecodeWorker:
       envFromSecret: hf-token-secret
       componentType: worker
-      replicas: 2
+      replicas: 1
       resources:
         requests:
           custom:
-            # Increase this value for larger models
             ephemeral-storage: "2Gi"
       extraPodSpec:
         resourceClaims:
           - name: gpu
             resourceClaimTemplateName: gpu-template
-        # Uncomment if needed for your environment
+        # NOTE: Uncomment if your environment requires specific group access
         # securityContext:
         #   runAsUser: 1000
         #   runAsGroup: 1000
         #   supplementalGroups:
-        #     - 44
-        #     - 991
+        #     - 44   # render group
+        #     - 991  # video group
         mainContainer:
           image: nvcr.io/nvidia/ai-dynamo/vllm-runtime:my-tag
-          workingDir: /workspace/examples/backends/vllm
           resources:
             claims:
               - name: gpu
           env:
             - name: VLLM_TARGET_DEVICE
               value: xpu
+            - name: OTEL_SERVICE_NAME
+              value: "dynamo-worker-vllm"
+          workingDir: /workspace/examples/backends/vllm
           command:
-          - python3
-          - -m
-          - dynamo.vllm
+            - python3
+            - -m
+            - dynamo.vllm
           args:
             - --model
             - Qwen/Qwen3-0.6B
-            - --block-size
-            - "64"
-            - --kv-events-config
-            - '{"enable_kv_cache_events": false}'
+            - --gpu-memory-utilization
+            - "0.9"
