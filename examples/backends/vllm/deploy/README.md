@@ -40,20 +40,22 @@ Advanced disaggregated deployment with KV cache routing capabilities.
 ### 5. **Global Planner Deployments** (see [`examples/global_planner/`](../../../global_planner/))
 Centralized scaling across multiple DGDs via GlobalPlanner. Examples include single-endpoint multi-pool and multi-model GPU budget patterns. See the [global planner examples](../../../global_planner/) for details.
 
-### 6. **Deployments with Intel XPU (Optional)** (see `xpu/` directory)
-Hardware-specific aggregated/disaggregated deployment using Kubernetes Dynamic Resource Allocation (DRA).
+### 6. **Deployments with Intel XPU** (see `xpu/` directory)
 
-**Aggregated Architecture:**
-- `Frontend`: OpenAI-compatible API server
-- `VllmDecodeWorker`: Single worker with XPU target (`VLLM_TARGET_DEVICE=xpu`)
-- GPU allocation via `ResourceClaimTemplate` and pod-level `resourceClaims`
+Hardware-specific templates for Intel XPU GPUs using Kubernetes DRA.
 
-**Disaggregated Architecture:**
-- `Frontend`: HTTP API server coordinating between workers
-- `VllmDecodeWorker`: Specialized decode-only worker with XPU target
-- `VllmPrefillWorker`: Specialized prefill-only worker with XPU target
-- GPU allocation via `ResourceClaimTemplate` and pod-level `resourceClaims`
-- Communication via NIXL transfer backend with XPU buffer
+| Template | Description |
+|----------|-------------|
+| `xpu/agg_xpu_dra.yaml` | Aggregated deployment with DRA |
+| `xpu/agg_tracing_xpu_dra.yaml` | Aggregated with OpenTelemetry tracing |
+| `xpu/agg_router_xpu_dra.yaml` | Aggregated with KV-aware routing |
+| `xpu/agg_router_kv_approx_xpu_dra.yaml` | Aggregated with KV approximation routing |
+| `xpu/disagg_xpu_dra.yaml` | Disaggregated deployment with DRA |
+| `xpu/disagg_tracing_xpu_dra.yaml` | Disaggregated with OpenTelemetry tracing |
+| `xpu/disagg_router_xpu_dra.yaml` | Disaggregated with KV Router mode |
+| `xpu/disagg_planner_xpu_dra.yaml` | Disaggregated with Global Planner |
+
+See [`xpu/README.md`](./xpu/README.md) for XPU-specific prerequisites and usage.
 
 ## CRD Structure
 
@@ -183,33 +185,20 @@ export DEPLOYMENT_FILE=agg.yaml
 kubectl apply -f $DEPLOYMENT_FILE -n $NAMESPACE
 ```
 
-#### Deploy with Intel XPU  (Optional)
-If your cluster uses Intel GPU devices via Kubernetes Dynamic Resource Allocation (DRA), ensure:
-- Your Kubernetes cluster is **v1.34+** (required for DRA API v1), and
-- The [Intel XPU Resource Driver](https://github.com/intel/intel-resource-drivers-for-kubernetes) is installed.
+#### Deploy with Intel XPU
 
-Deploy the XPU template (includes the ResourceClaimTemplate):
+For Intel XPU clusters with DRA support (Kubernetes v1.34+ and [Intel GPU Resource Driver](https://github.com/intel/intel-resource-drivers-for-kubernetes) installed):
+
 ```bash
-cd <dynamo-source-root>/examples/backends/vllm/deploy
-
-# For aggregated deployment
+# Apply any XPU template
 kubectl apply -f xpu/agg_xpu_dra.yaml -n $NAMESPACE
 
-# OR for disaggregated deployment
-kubectl apply -f xpu/disagg_xpu_dra.yaml -n $NAMESPACE
-
-# OR for KV-aware routing deployment
-kubectl apply -f xpu/agg_router_xpu_dra.yaml -n $NAMESPACE
-```
-
-Verify claim allocation:
-
-```bash
+# Verify allocation
 kubectl get resourceclaim -n $NAMESPACE
-kubectl get dynamographdeployment -n $NAMESPACE
+kubectl get resourceslices
 ```
 
-XPU templates in `xpu/` directory are optional hardware-specific templates and do not change the default deployment paths defined by `agg.yaml` and `disagg.yaml`.
+See [`xpu/README.md`](./xpu/README.md) for the full list of XPU templates and requirements.
 
 ### 4. Using Custom Dynamo Frameworks Image for vLLM
 
