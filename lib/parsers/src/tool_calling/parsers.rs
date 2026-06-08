@@ -58,7 +58,24 @@ pub fn get_tool_parser_map() -> &'static HashMap<&'static str, ToolCallConfig> {
         map.insert("gemma-4", ToolCallConfig::gemma4());
         map.insert("default", ToolCallConfig::default());
         map.insert("nemotron_nano", ToolCallConfig::qwen3_coder()); // nemotron nano follows qwen3_coder format
-        map.insert("qwen25", ToolCallConfig::hermes()); // qwen2.5 uses the same <tool_call>...</tool_call> format as hermes
+        // qwen2.5 uses the same <tool_call>...</tool_call> format as hermes, but
+        // unlike hermes it has no upstream vLLM parser (and SGLang does not parse
+        // this family's wrapper). With no vLLM peer to align to, qwen25 keeps the
+        // default trim behavior rather than hermes's vLLM-matching verbatim
+        // whitespace; preserving the space would change qwen25's sole-oracle
+        // output for no parity benefit.
+        let mut qwen25 = ToolCallConfig::hermes();
+        if let ParserConfig::Json(ref mut c) = qwen25.parser_config {
+            // qwen25 is sole-oracle (no vLLM/SGLang peer); it must not inherit
+            // hermes's vendor-alignment behaviors. Reset them to the
+            // conservative defaults so qwen25's established output is unchanged.
+            c.preserve_normal_text_whitespace = false;
+            c.repair_truncated_body = true;
+            c.drop_unusable_json_wrapper = false;
+            c.drop_partial_markup_on_stream_finalize = false;
+            c.recover_trailing_unclosed_call = false;
+        }
+        map.insert("qwen25", qwen25);
         map
     })
 }
@@ -182,11 +199,64 @@ async fn detect_and_parse_tool_call_with_recovery_options(
         // Other parsers don't have an EOF-recovery flag — pass through.
         other => other.clone(),
     };
+    // Stream-finalize partial-markup suppression (TOOLCALLING.stream.4.b).
+    // Computed before `recovery_config` is moved into `cfg`. When the model
+    // opened a tool call that never terminated and nothing is recovered, drop
+    // the dangling wrapper markup but PRESERVE any prose that preceded the
+    // opener. Only fires when:
+    //   * this is the stream-finalize path (`recover_dsml_eof`), so the batch
+    //     path keeps its documented leak behavior;
+    //   * the JSON family opted in (`drop_partial_markup_on_stream_finalize`);
+    //   * a start token is present AND no end token follows it — i.e. the
+    //     wrapper is genuinely UNCLOSED. A fully closed (but malformed) wrapper
+    //     is left to the normal parse path and returns verbatim normal_text.
+    // The value is the prose before the opener (Some) when suppression applies.
+    let partial_markup_prefix: Option<String> = if recover_dsml_eof
+        && let ParserConfig::Json(c) = &recovery_config
+        && c.drop_partial_markup_on_stream_finalize
+    {
+        let earliest_start = c
+            .tool_call_start_tokens
+            .iter()
+            .filter(|t| !t.is_empty())
+            .filter_map(|t| message.find(t.as_str()).map(|p| (p, t.len())))
+            .min_by_key(|(p, _)| *p);
+        match earliest_start {
+            Some((pos, tok_len)) => {
+                let after_opener = &message[pos + tok_len..];
+                let closed = c
+                    .tool_call_end_tokens
+                    .iter()
+                    .any(|e| !e.is_empty() && after_opener.contains(e.as_str()));
+                if closed {
+                    None
+                } else {
+                    // Preserve pre-opener prose, honoring the family's
+                    // whitespace policy (verbatim for hermes, else trimmed).
+                    let pre = &message[..pos];
+                    Some(if c.preserve_normal_text_whitespace {
+                        pre.to_string()
+                    } else {
+                        pre.trim().to_string()
+                    })
+                }
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
     let cfg = ToolCallConfig {
         parser_config: recovery_config,
         structural_tag_builder: None,
     };
-    try_tool_call_parse(message, &cfg, tools).await
+    let (calls, content) = try_tool_call_parse(message, &cfg, tools).await?;
+    if let Some(prefix) = partial_markup_prefix
+        && calls.is_empty()
+    {
+        return Ok((vec![], Some(prefix)));
+    }
+    Ok((calls, content))
 }
 
 // Base Detector to call for all tool parsing
@@ -584,7 +654,8 @@ Okay, the user is asking for the weather in San Francisco in Fahrenheit. Let me 
         let (result, content) = detect_and_parse_tool_call(input, Some("hermes"), None)
             .await
             .unwrap();
-        assert_eq!(content, Some("Hey How are you?".to_string()));
+        // hermes preserves the narration verbatim (trailing space) to match vLLM.
+        assert_eq!(content, Some("Hey How are you? ".to_string()));
         assert!(!result.is_empty());
         assert_eq!(result.len(), 1);
     }
@@ -734,7 +805,8 @@ Okay, the user is asking for the weather in San Francisco in Fahrenheit. Let me 
 "#;
         let config = ToolCallConfig::hermes();
         let (result, content) = try_tool_call_parse(input, &config, None).await.unwrap();
-        assert_eq!(content, Some("Hey How are you?".to_string()));
+        // hermes preserves the narration verbatim (trailing space) to match vLLM.
+        assert_eq!(content, Some("Hey How are you? ".to_string()));
         assert!(!result.is_empty());
         assert_eq!(result.len(), 2);
         let (name, args) = extract_name_and_args(result[0].clone());
