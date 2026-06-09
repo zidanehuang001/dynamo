@@ -32,7 +32,7 @@ use tracing::Instrument;
 use super::{
     RouteDoc,
     disconnect::{ConnectionHandle, create_connection_monitor, monitor_for_disconnects},
-    metrics::{CancellationLabels, Endpoint, process_response_and_observe_metrics},
+    metrics::{CancellationLabels, Endpoint, process_chat_response_and_observe_metrics},
     service_v2,
 };
 use crate::protocols::anthropic::stream_converter::AnthropicStreamConverter;
@@ -390,7 +390,7 @@ async fn anthropic_messages(
 
         let event_stream = engine_stream
             .inspect(move |response| {
-                process_response_and_observe_metrics(
+                process_chat_response_and_observe_metrics(
                     response,
                     &mut response_collector,
                     &mut http_queue_guard,
@@ -472,7 +472,7 @@ async fn anthropic_messages(
 
         let mut http_queue_guard = Some(http_queue_guard);
         let stream = stream_with_check.inspect(move |response| {
-            process_response_and_observe_metrics(
+            process_chat_response_and_observe_metrics(
                 response,
                 &mut response_collector,
                 &mut http_queue_guard,
